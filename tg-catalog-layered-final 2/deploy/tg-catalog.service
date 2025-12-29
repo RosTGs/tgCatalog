@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram catalog bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/tg-catalog-layered-final
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/root/tg-catalog-layered-final/.venv/bin/python main.py
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target
