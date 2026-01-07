@@ -158,7 +158,7 @@ def kb_adm_home(is_admin_user: bool) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton("Категории", callback_data="adm:cats:0"),
-            InlineKeyboardButton("Товары", callback_data="adm:prods:cats:0"),
+            InlineKeyboardButton("Товары", callback_data="adm:prods:0"),
         ],
         [InlineKeyboardButton("Главные кнопки", callback_data="adm:links")],
         [InlineKeyboardButton("Приветствие", callback_data="adm:welcome")],
@@ -239,15 +239,46 @@ def kb_adm_prods_cats(page: int = 0, per: int = 12) -> InlineKeyboardMarkup:
     if start > 0:
         nav.append(
             InlineKeyboardButton(
-                "◀", callback_data=f"adm:prods:cats:{max(0, page-1)}"
+                "◀", callback_data=f"adm:prods:{max(0, page-1)}"
             )
         )
     if start + per < len(cats):
         nav.append(
-            InlineKeyboardButton("▶", callback_data=f"adm:prods:cats:{page+1}")
+            InlineKeyboardButton("▶", callback_data=f"adm:prods:{page+1}")
         )
     if nav:
         rows.append(nav)
+    rows.append([InlineKeyboardButton("◀ Меню", callback_data="adm:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def kb_adm_prods_list(page: int = 0, per: int = 10) -> InlineKeyboardMarkup:
+    prods = db_query("SELECT * FROM products ORDER BY id")
+    rows: list[list[InlineKeyboardButton]] = []
+    start = page * per
+    for p in prods[start : start + per]:
+        mark = "🟢" if p["is_active"] else "⚫"
+        total_stock, _, _ = product_variant_info(p["id"], p["stock"])
+        name = (
+            f"{mark} {p['id']}. {shorten(p['name'], 26)} [{total_stock}]"
+        )
+        rows.append(
+            [InlineKeyboardButton(name, callback_data=f"adm:prod:{p['id']}")]
+        )
+    nav: list[InlineKeyboardButton] = []
+    if start > 0:
+        nav.append(
+            InlineKeyboardButton(
+                "◀", callback_data=f"adm:prods:{max(0, page-1)}"
+            )
+        )
+    if start + per < len(prods):
+        nav.append(
+            InlineKeyboardButton("▶", callback_data=f"adm:prods:{page+1}")
+        )
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("➕ Добавить товар", callback_data="adm:prod:add")])
     rows.append([InlineKeyboardButton("◀ Меню", callback_data="adm:home")])
     return InlineKeyboardMarkup(rows)
 
@@ -294,7 +325,7 @@ def kb_adm_prods(cat_id: int, page: int = 0, per: int = 10) -> InlineKeyboardMar
         ]
     )
     rows.append(
-        [InlineKeyboardButton("◀ Категории", callback_data="adm:prods:cats:0")]
+        [InlineKeyboardButton("◀ Товары", callback_data="adm:prods:0")]
     )
     return InlineKeyboardMarkup(rows)
 
@@ -317,6 +348,9 @@ def kb_adm_prod(pid: int) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                "🏷 Категории", callback_data=f"adm:prod:cats:edit:{pid}"
+            ),
+            InlineKeyboardButton(
                 "🧩 Варианты", callback_data=f"adm:prod:variants:{pid}"
             )
         ],
@@ -338,7 +372,7 @@ def kb_adm_prod(pid: int) -> InlineKeyboardMarkup:
                 "🗑 Удалить товар", callback_data=f"adm:prod:delete:{pid}"
             )
         ],
-        [InlineKeyboardButton("◀ К списку", callback_data="adm:prods:cats:0")],
+        [InlineKeyboardButton("◀ К списку", callback_data="adm:prods:0")],
     ]
     if not has_variants:
         rows[1].append(
@@ -597,14 +631,16 @@ async def adm_open_cat(update: Update, context: ContextTypes.DEFAULT_TYPE, cat_i
     await replace_menu(update, context, text, kb_adm_cat(c["id"]), scope="admin")
 
 
-async def adm_open_prods_cats(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+async def adm_open_prods_list(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0
+):
     if not has_perm(update.effective_user.id, "prods"):
         return
     await replace_menu(
         update,
         context,
-        "<b>Товары → Категории</b>",
-        kb_adm_prods_cats(page),
+        "<b>Товары</b>",
+        kb_adm_prods_list(page),
         scope="admin",
     )
 
@@ -1342,13 +1378,6 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- Товары ---
 
-    if data.startswith("adm:prods:cats:"):
-        if not has_perm(update.effective_user.id, "prods"):
-            return
-        page = int(data.split(":")[3])
-        await adm_open_prods_cats(update, context, page)
-        return
-
     if data.startswith("adm:prods:cat:"):
         if not has_perm(update.effective_user.id, "prods"):
             return
@@ -1358,21 +1387,26 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await adm_open_prods(update, context, cat_id, page)
         return
 
-    if data.startswith("adm:prod:add:"):
+    if data.startswith("adm:prods:"):
         if not has_perm(update.effective_user.id, "prods"):
             return
-        cat_id = int(data.split(":")[3])
+        page = int(data.split(":")[2])
+        await adm_open_prods_list(update, context, page)
+        return
+
+    if data.startswith("adm:prod:add"):
+        if not has_perm(update.effective_user.id, "prods"):
+            return
+        parts = data.split(":")
+        cat_id = int(parts[3]) if len(parts) > 3 else None
+        back_cb = (
+            f"adm:prods:cat:{cat_id}:0" if cat_id is not None else "adm:prods:0"
+        )
         context.user_data["await_prod_add_cat"] = cat_id
         context.user_data["await_prod_name"] = True
+        context.user_data["prod_add_back"] = back_cb
         kb = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "◀ Назад",
-                        callback_data=f"adm:prods:cat:{cat_id}:0",
-                    )
-                ]
-            ]
+            [[InlineKeyboardButton("◀ Назад", callback_data=back_cb)]]
         )
         await replace_menu(update, context, "Имя товара:", kb, scope="admin")
         return
@@ -1452,7 +1486,7 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         pid = int(data.split(":")[4])
         db_exec("DELETE FROM products WHERE id=?", (pid,))
-        await adm_open_prods_cats(update, context, 0)
+        await adm_open_prods_list(update, context, 0)
         return
 
     if data.startswith("adm:prod:cats:toggle:"):
@@ -1471,6 +1505,22 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             selected.remove(cat_id)
         else:
             selected.add(cat_id)
+        context.user_data["prod_cats_selected"] = selected
+        await replace_menu(
+            update,
+            context,
+            "Выберите категории для товара (можно несколько):",
+            kb_adm_prod_categories(pid, selected),
+            scope="admin",
+        )
+        return
+
+    if data.startswith("adm:prod:cats:edit:"):
+        if not has_perm(update.effective_user.id, "prods"):
+            return
+        pid = int(data.split(":")[4])
+        selected = {row["id"] for row in product_categories(pid)}
+        context.user_data["prod_cats_pid"] = pid
         context.user_data["prod_cats_selected"] = selected
         await replace_menu(
             update,
@@ -2206,13 +2256,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         context.user_data["new_prod_name"] = text
         context.user_data["await_prod_desc"] = True
-        cat_id = context.user_data.get("await_prod_add_cat")
+        back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
         kb = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "◀ Назад",
-                        callback_data=f"adm:prods:cat:{cat_id}:0",
+                        "◀ Назад", callback_data=back_cb,
                     )
                 ]
             ]
@@ -2225,13 +2274,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         context.user_data["new_prod_desc"] = text
         context.user_data["await_prod_price"] = True
-        cat_id = context.user_data.get("await_prod_add_cat")
+        back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
         kb = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "◀ Назад",
-                        callback_data=f"adm:prods:cat:{cat_id}:0",
+                        "◀ Назад", callback_data=back_cb,
                     )
                 ]
             ]
@@ -2248,13 +2296,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             price = int(text)
         except Exception:
             context.user_data["await_prod_price"] = True
-            cat_id = context.user_data.get("await_prod_add_cat")
+            back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
             kb = InlineKeyboardMarkup(
                 [
                     [
                         InlineKeyboardButton(
-                            "◀ Назад",
-                            callback_data=f"adm:prods:cat:{cat_id}:0",
+                            "◀ Назад", callback_data=back_cb,
                         )
                     ]
                 ]
@@ -2265,13 +2312,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         context.user_data["new_prod_price"] = price
         context.user_data["await_prod_stock"] = True
-        cat_id = context.user_data.get("await_prod_add_cat")
+        back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
         kb = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "◀ Назад",
-                        callback_data=f"adm:prods:cat:{cat_id}:0",
+                        "◀ Назад", callback_data=back_cb,
                     )
                 ]
             ]
@@ -2292,13 +2338,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stock = int(text)
         except Exception:
             context.user_data["await_prod_stock"] = True
-            cat_id = context.user_data.get("await_prod_add_cat")
+            back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
             kb = InlineKeyboardMarkup(
                 [
                     [
                         InlineKeyboardButton(
-                            "◀ Назад",
-                            callback_data=f"adm:prods:cat:{cat_id}:0",
+                            "◀ Назад", callback_data=back_cb,
                         )
                     ]
                 ]
@@ -2308,6 +2353,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         cat_id = context.user_data.pop("await_prod_add_cat", None)
+        context.user_data.pop("prod_add_back", None)
         name = context.user_data.pop("new_prod_name", "Товар")
         desc = context.user_data.pop("new_prod_desc", "")
         price = context.user_data.pop("new_prod_price", 0)
