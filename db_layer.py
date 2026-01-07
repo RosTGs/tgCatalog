@@ -163,8 +163,8 @@ CREATE TABLE IF NOT EXISTS messages (
         "auto_delete_admin": "0",
         "reserve_enabled": "1",
         "reserve_text": "Забронировать",
-        "reserve_mode": "wa",  # wa | raw
-        "reserve_phone": "",
+        "reserve_mode": "tg",
+        "reserve_tg_username": "",
         "reserve_msg_tpl": "Здравствуйте, хочу забронировать украшение {name} (ID: {id}, Цена: {price})",
         "reserve_url": "https://example.com/reserve?pid={id}&name={name}&price={price}",
         "links_json": "[]",
