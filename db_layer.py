@@ -64,13 +64,21 @@ CREATE TABLE IF NOT EXISTS categories (
 
 CREATE TABLE IF NOT EXISTS products (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    category_id INTEGER NOT NULL,
+    category_id INTEGER,
     name        TEXT    NOT NULL,
     description TEXT,
     price       INTEGER NOT NULL DEFAULT 0,
     stock       INTEGER NOT NULL DEFAULT 0,
     is_active   INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_categories (
+    product_id  INTEGER NOT NULL,
+    category_id INTEGER NOT NULL,
+    PRIMARY KEY (product_id, category_id),
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
 );
 

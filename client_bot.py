@@ -59,7 +59,8 @@ async def client_menu_callback(update: Update, context):
     data = query.data or ""
 
     if data == "client:categories":
-        categories = catalog_service.list_categories()
+        categories = db_query("SELECT * FROM categories ORDER BY id", ())
+        categories = [dict(row) for row in categories]
         text = "Выберите категорию:"
         if not categories:
             text = "Категорий пока нет."
@@ -71,6 +72,28 @@ async def client_menu_callback(update: Update, context):
         return
 
 # Обработчик категорий
+async def client_categories_callback(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    if data.startswith("client:cat:"):
+        cat_id = int(data.split(":")[2])
+        products = db_query(
+            "SELECT p.* FROM products p "
+            "JOIN product_categories pc ON pc.product_id=p.id "
+            "WHERE p.is_active=1 AND pc.category_id=? ORDER BY p.id",
+            (cat_id,),
+        )
+        prods = [dict(row) for row in products]
+        text = "Выберите товар:"
+        if not prods:
+            text = "В этой категории пока нет товаров."
+        await query.edit_message_text(
+            text, reply_markup=client_products_keyboard(cat_id, prods)
+        )
+        return
+
 # Обработчик товаров
 # Обработчик товаров – только текст, без картинок и без дублей
 
@@ -95,15 +118,11 @@ async def client_products_callback(update: Update, context):
 
     if data.startswith("client:product:"):
         _, _, cat_id_str, prod_id_str = data.split(":")
+        cat_id = int(cat_id_str)
         pid = int(prod_id_str)
 
         # грузим товар + категорию
-        rows = db_query(
-            "SELECT p.*, c.name as cat "
-            "FROM products p JOIN categories c ON c.id=p.category_id "
-            "WHERE p.id=?",
-            (pid,),
-        )
+        rows = db_query("SELECT * FROM products WHERE id=?", (pid,))
         if not rows:
             # если товара нет, просто вернёмся к категориям
             categories = db_query("SELECT * FROM categories ORDER BY id", ())
@@ -114,11 +133,18 @@ async def client_products_callback(update: Update, context):
             return
 
         prod = rows[0]
+        cat_rows = db_query(
+            "SELECT c.name FROM categories c "
+            "JOIN product_categories pc ON pc.category_id=c.id "
+            "WHERE pc.product_id=? ORDER BY c.id",
+            (pid,),
+        )
+        cats_label = ", ".join([row["name"] for row in cat_rows]) or "—"
 
         # текст карточки товара
         lines = [
             f"<b>{prod['name']}</b>",
-            f"Категория: {prod['cat']}",
+            f"Категории: {cats_label}",
             f"Цена: {prod['price']} ₽",
             f"Остаток: {prod['stock']}"
             + (" (нет в наличии)" if prod["stock"] <= 0 else ""),
@@ -138,7 +164,7 @@ async def client_products_callback(update: Update, context):
             [
                 InlineKeyboardButton(
                     "◀ Назад к товарам",
-                    callback_data=f"client:cat:{prod['category_id']}",
+                    callback_data=f"client:cat:{cat_id}",
                 )
             ]
         )
