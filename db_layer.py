@@ -89,6 +89,14 @@ CREATE TABLE IF NOT EXISTS photos (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS product_variants (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    name       TEXT    NOT NULL,
+    stock      INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS users (
     user_id    INTEGER PRIMARY KEY,
     username   TEXT,
