@@ -40,13 +40,20 @@ python main.py
    ```
 3. Клонируйте репозиторий и перейдите в директорию проекта:
    ```bash
-   git clone <URL_РЕПОЗИТОРИЯ>
-   cd tgCatalog
+   sudo mkdir -p /srv/tgCatalog
+   sudo chown -R "$USER":"$USER" /srv/tgCatalog
+   git clone <URL_РЕПОЗИТОРИЯ> /srv/tgCatalog
+   cd /srv/tgCatalog
    ```
 4. Создайте `.env` и заполните переменные (минимум `BOT_TOKEN`, `ADMIN_IDS`, `DB_PATH`):
    ```bash
-   cp .env.example .env  # если есть шаблон
    nano .env
+   ```
+   Пример:
+   ```dotenv
+   BOT_TOKEN=ваш_токен
+   ADMIN_IDS=123456,987654
+   DB_PATH=/var/lib/tg-catalog/catalog.db
    ```
 5. Установите зависимости:
    ```bash
@@ -56,11 +63,30 @@ python main.py
    ```
 6. Запустите бота (один из вариантов):
    - **systemd**: создайте сервис, чтобы бот стартовал при перезагрузке.
+     ```ini
+     [Unit]
+     Description=TG Catalog Bot
+     After=network.target
+
+     [Service]
+     WorkingDirectory=/srv/tgCatalog
+     ExecStart=/srv/tgCatalog/venv/bin/python /srv/tgCatalog/main.py
+     Restart=always
+     User=youruser
+
+     [Install]
+     WantedBy=multi-user.target
+     ```
+     Замените `User` и пути на свои.
+     ```bash
+     sudo systemctl daemon-reload
+     sudo systemctl enable --now tg-catalog.service
+     ```
    - **pm2**: можно запустить через `pm2 start "venv/bin/python main.py" --name tg-catalog`.
-7. При необходимости откройте нужные порты в панели Timeweb (если используете вебхуки или внешний доступ).
+7. При необходимости откройте нужные порты в панели Timeweb (например, для вебхуков или внешнего HTTP-доступа).
 
 ### Хранение базы и резервных копий
 
 - Переменная `DB_PATH` должна указывать на путь к файлу базы (например, `/var/lib/tg-catalog/catalog.db`).
-- Рекомендуется хранить базу вне директории репозитория (например, `/var/lib/tg-catalog/`).
+- Рекомендуется хранить базу вне директории репозитория (например, `/var/lib/tg-catalog/`), предварительно создав каталог и выдав права пользователю, под которым запускается бот.
 - Каталог `backups` лучше располагать рядом с базой: `/var/lib/tg-catalog/backups/`.
