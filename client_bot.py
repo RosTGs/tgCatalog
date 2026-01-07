@@ -44,13 +44,13 @@ def reserve_button(prod) -> InlineKeyboardButton:
     return InlineKeyboardButton(f"📞 Забронировать {prod['name']}", url=url)
 
 
-def product_variant_lines(pid: int, fallback_stock: int):
+def product_variant_lines(pid: int):
     rows = db_query(
         "SELECT name,stock FROM product_variants WHERE product_id=? ORDER BY id",
         (pid,),
     )
     if not rows:
-        return [f"Остаток: {fallback_stock}"], fallback_stock
+        return ["Варианты: нет."], 0
     total = sum(row["stock"] for row in rows)
     lines = ["Варианты:"]
     lines.extend([f"• {row['name']} — {row['stock']}" for row in rows])
@@ -156,11 +156,10 @@ async def client_products_callback(update: Update, context):
         cats_label = ", ".join([row["name"] for row in cat_rows]) or "—"
 
         # текст карточки товара
-        stock_lines, total_stock = product_variant_lines(pid, prod["stock"])
+        stock_lines, total_stock = product_variant_lines(pid)
         lines = [
             f"<b>{prod['name']}</b>",
             f"Категории: {cats_label}",
-            f"Цена: {prod['price']} ₽",
             *stock_lines,
         ]
         if total_stock <= 0:

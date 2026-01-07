@@ -67,38 +67,29 @@ def product_variants(pid: int):
     )
 
 
-def product_variant_info(
-    pid: int, fallback_stock: int
-) -> tuple[int, bool, list[str]]:
+def product_variant_info(pid: int) -> tuple[int, bool, list[str]]:
     rows = product_variants(pid)
     if not rows:
-        return fallback_stock, False, []
+        return 0, False, []
     total = sum(r["stock"] for r in rows)
     lines = [f"• {r['name']} — {r['stock']}" for r in rows]
     return total, True, lines
 
 
-def product_stock_lines(
-    pid: int, fallback_stock: int
-) -> tuple[list[str], int, bool]:
-    total, has_variants, variant_lines = product_variant_info(
-        pid, fallback_stock
-    )
+def product_stock_lines(pid: int) -> tuple[list[str], int, bool]:
+    total, has_variants, variant_lines = product_variant_info(pid)
     if has_variants:
         lines = ["Варианты:"] + variant_lines + [f"Итого: {total}"]
     else:
-        lines = [f"Остаток: {fallback_stock}"]
+        lines = ["Варианты: нет."]
     return lines, total, has_variants
 
 
 def caption_for(prod, cat_name: str) -> str:
-    stock_lines, total_stock, _ = product_stock_lines(
-        prod["id"], prod["stock"]
-    )
+    stock_lines, total_stock, _ = product_stock_lines(prod["id"])
     parts = [
         f"<b>{prod['name']}</b>",
         f"Категория: {cat_name}",
-        f"Цена: {prod['price']} ₽",
         *stock_lines,
     ]
     if total_stock <= 0:
@@ -258,7 +249,7 @@ def kb_adm_prods_list(page: int = 0, per: int = 10) -> InlineKeyboardMarkup:
     start = page * per
     for p in prods[start : start + per]:
         mark = "🟢" if p["is_active"] else "⚫"
-        total_stock, _, _ = product_variant_info(p["id"], p["stock"])
+        total_stock, _, _ = product_variant_info(p["id"])
         name = (
             f"{mark} {p['id']}. {shorten(p['name'], 26)} [{total_stock}]"
         )
@@ -294,7 +285,7 @@ def kb_adm_prods(cat_id: int, page: int = 0, per: int = 10) -> InlineKeyboardMar
     start = page * per
     for p in prods[start : start + per]:
         mark = "🟢" if p["is_active"] else "⚫"
-        total_stock, _, _ = product_variant_info(p["id"], p["stock"])
+        total_stock, _, _ = product_variant_info(p["id"])
         name = (
             f"{mark} {p['id']}. {shorten(p['name'], 26)} [{total_stock}]"
         )
@@ -331,7 +322,6 @@ def kb_adm_prods(cat_id: int, page: int = 0, per: int = 10) -> InlineKeyboardMar
 
 
 def kb_adm_prod(pid: int) -> InlineKeyboardMarkup:
-    _, has_variants, _ = product_variant_info(pid, 0)
     rows = [
         [
             InlineKeyboardButton(
@@ -339,11 +329,6 @@ def kb_adm_prod(pid: int) -> InlineKeyboardMarkup:
             ),
             InlineKeyboardButton(
                 "✏️ Описание", callback_data=f"adm:prod:edit:desc:{pid}"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                "✏️ Цена", callback_data=f"adm:prod:edit:price:{pid}"
             ),
         ],
         [
@@ -374,12 +359,6 @@ def kb_adm_prod(pid: int) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("◀ К списку", callback_data="adm:prods:0")],
     ]
-    if not has_variants:
-        rows[1].append(
-            InlineKeyboardButton(
-                "✏️ Остаток", callback_data=f"adm:prod:edit:stock:{pid}"
-            )
-        )
     return InlineKeyboardMarkup(rows)
 
 
@@ -470,11 +449,10 @@ def product_text(pid: int) -> str:
     if not r:
         return "Товар не найден"
     p = r[0]
-    stock_lines, _, _ = product_stock_lines(pid, p["stock"])
+    stock_lines, _, _ = product_stock_lines(pid)
     lines = [
         f"<b>{p['name']}</b>",
         f"ID: {p['id']}  Категории: {product_categories_label(pid)}",
-        f"Цена: {p['price']} ₽",
         *stock_lines,
         f"Активен: {bool(p['is_active'])}",
         "",
@@ -684,7 +662,7 @@ async def adm_open_prod(
 
     prod = r[0]
     cats_label = product_categories_label(pid)
-    stock_lines, total_stock, _ = product_stock_lines(pid, prod["stock"])
+    stock_lines, total_stock, _ = product_stock_lines(pid)
 
     # 1) сначала все фото медиагруппой
     photos = db_query(
@@ -703,7 +681,6 @@ async def adm_open_prod(
     lines = [
         f"<b>{prod['name']}</b>",
         f"Категории: {cats_label}",
-        f"Цена: {prod['price']} ₽",
         *stock_lines,
     ]
     if total_stock <= 0:
@@ -732,7 +709,7 @@ async def adm_open_prod_variants(
 ):
     if not has_perm(update.effective_user.id, "prods"):
         return
-    total_stock, has_variants, variant_lines = product_variant_info(pid, 0)
+    total_stock, has_variants, variant_lines = product_variant_info(pid)
     lines = [f"<b>Варианты товара {pid}</b>"]
     if has_variants:
         lines.extend(variant_lines)
@@ -1079,14 +1056,13 @@ async def show_shop_grid(
     items = prods[start : start + per]
     for p in items:
         pid = p["id"]
-        stock_lines, total_stock, _ = product_stock_lines(pid, p["stock"])
+        stock_lines, total_stock, _ = product_stock_lines(pid)
         ph = db_query(
             "SELECT file_id FROM photos WHERE product_id=? ORDER BY id LIMIT 1",
             (pid,),
         )
         lines = [
             f"<b>{p['name']}</b>",
-            f"Цена: {p['price']} ₽",
             *stock_lines,
         ]
         if total_stock <= 0:
@@ -1157,13 +1133,12 @@ async def show_shop_product(
 
     prod = r[0]
     cats_label = product_categories_label(pid)
-    stock_lines, total_stock, _ = product_stock_lines(pid, prod["stock"])
+    stock_lines, total_stock, _ = product_stock_lines(pid)
 
     # --- текст карточки ---
     lines = [
         f"<b>{prod['name']}</b>",
         f"Категории: {cats_label}",
-        f"Цена: {prod['price']} ₽",
         *stock_lines,
     ]
     if total_stock <= 0:
@@ -1321,22 +1296,7 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not has_perm(update.effective_user.id, "cats"):
             return
         cid = int(data.split(":")[4])
-        prod_ids = db_query(
-            "SELECT product_id FROM product_categories WHERE category_id=?",
-            (cid,),
-        )
         db_exec("DELETE FROM product_categories WHERE category_id=?", (cid,))
-        if prod_ids:
-            ids = [row["product_id"] for row in prod_ids]
-            placeholders = ",".join(["?"] * len(ids))
-            db_exec(
-                f"""DELETE FROM products
-                    WHERE id IN ({placeholders})
-                    AND id NOT IN (
-                        SELECT product_id FROM product_categories
-                    )""",
-                tuple(ids),
-            )
         db_exec("DELETE FROM categories WHERE id=?", (cid,))
         await adm_open_cats(update, context, 0)
         return
@@ -1363,7 +1323,7 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await replace_menu(
             update,
             context,
-            "Удалить категорию и связи с товарами? Товары без категорий будут удалены.",
+            "Удалить категорию и связи с товарами?",
             kb,
             scope="admin",
         )
@@ -1402,7 +1362,6 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         back_cb = (
             f"adm:prods:cat:{cat_id}:0" if cat_id is not None else "adm:prods:0"
         )
-        context.user_data["await_prod_add_cat"] = cat_id
         context.user_data["await_prod_name"] = True
         context.user_data["prod_add_back"] = back_cb
         kb = InlineKeyboardMarkup(
@@ -1432,32 +1391,6 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await replace_menu(
             update, context, "Новое описание:", kb, scope="admin"
-        )
-        return
-
-    if data.startswith("adm:prod:edit:price:"):
-        if not has_perm(update.effective_user.id, "prods"):
-            return
-        pid = int(data.split(":")[4])
-        context.user_data["await_prod_price_edit"] = pid
-        kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("◀ Назад", callback_data=f"adm:prod:{pid}")]]
-        )
-        await replace_menu(
-            update, context, "Новая цена (число):", kb, scope="admin"
-        )
-        return
-
-    if data.startswith("adm:prod:edit:stock:"):
-        if not has_perm(update.effective_user.id, "prods"):
-            return
-        pid = int(data.split(":")[4])
-        context.user_data["await_prod_stock_edit"] = pid
-        kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("◀ Назад", callback_data=f"adm:prod:{pid}")]]
-        )
-        await replace_menu(
-            update, context, "Новый остаток (число):", kb, scope="admin"
         )
         return
 
@@ -1540,15 +1473,6 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row["id"] for row in product_categories(pid)
             }
         selected = context.user_data.get("prod_cats_selected", set())
-        if not selected:
-            await replace_menu(
-                update,
-                context,
-                "Нужно выбрать хотя бы одну категорию.",
-                kb_adm_prod_categories(pid, selected),
-                scope="admin",
-            )
-            return
         db_exec("DELETE FROM product_categories WHERE product_id=?", (pid,))
         for cat_id in sorted(selected):
             db_exec(
@@ -2272,111 +2196,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.pop("await_prod_desc", False):
         if not has_perm(uid, "prods"):
             return
-        context.user_data["new_prod_desc"] = text
-        context.user_data["await_prod_price"] = True
-        back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
-        kb = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "◀ Назад", callback_data=back_cb,
-                    )
-                ]
-            ]
-        )
-        await replace_menu(
-            update, context, "Цена (число):", kb, scope="admin"
-        )
-        return
-
-    if context.user_data.pop("await_prod_price", False):
-        if not has_perm(uid, "prods"):
-            return
-        try:
-            price = int(text)
-        except Exception:
-            context.user_data["await_prod_price"] = True
-            back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
-            kb = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "◀ Назад", callback_data=back_cb,
-                        )
-                    ]
-                ]
-            )
-            await replace_menu(
-                update, context, "Введите число.", kb, scope="admin"
-            )
-            return
-        context.user_data["new_prod_price"] = price
-        context.user_data["await_prod_stock"] = True
-        back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
-        kb = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "◀ Назад", callback_data=back_cb,
-                    )
-                ]
-            ]
-        )
-        await replace_menu(
-            update,
-            context,
-            "Остаток (число):",
-            kb,
-            scope="admin",
-        )
-        return
-
-    if context.user_data.pop("await_prod_stock", False):
-        if not has_perm(uid, "prods"):
-            return
-        try:
-            stock = int(text)
-        except Exception:
-            context.user_data["await_prod_stock"] = True
-            back_cb = context.user_data.get("prod_add_back", "adm:prods:0")
-            kb = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "◀ Назад", callback_data=back_cb,
-                        )
-                    ]
-                ]
-            )
-            await replace_menu(
-                update, context, "Введите число.", kb, scope="admin"
-            )
-            return
-        cat_id = context.user_data.pop("await_prod_add_cat", None)
         context.user_data.pop("prod_add_back", None)
         name = context.user_data.pop("new_prod_name", "Товар")
-        desc = context.user_data.pop("new_prod_desc", "")
-        price = context.user_data.pop("new_prod_price", 0)
+        desc = text
         pid = db_exec(
             """INSERT INTO products(
                    name,description,price,stock,is_active
-               ) VALUES(?,?,?,?,1)""",
-            (name, desc, price, stock),
+               ) VALUES(?,?,0,0,1)""",
+            (name, desc),
         )
-        cats = db_query("SELECT * FROM categories ORDER BY id")
-        if not cats:
-            await adm_open_prod(update, context, pid)
-            return
-        selected = {cat_id} if cat_id else set()
-        context.user_data["prod_cats_pid"] = pid
-        context.user_data["prod_cats_selected"] = selected
-        await replace_menu(
-            update,
-            context,
-            "Выберите категории для товара (можно несколько):",
-            kb_adm_prod_categories(pid, selected),
-            scope="admin",
-        )
+        await adm_open_prod(update, context, pid)
         return
 
     # --- редактирование товара ---
@@ -2397,58 +2226,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "UPDATE products SET description=? WHERE id=?",
             (text, pid),
         )
-        await adm_open_prod(update, context, pid)
-        return
-
-    pid = context.user_data.pop("await_prod_price_edit", None)
-    if pid:
-        if not has_perm(uid, "prods"):
-            return
-        try:
-            price = int(text)
-        except Exception:
-            context.user_data["await_prod_price_edit"] = pid
-            kb = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "◀ Назад",
-                            callback_data=f"adm:prod:{pid}",
-                        )
-                    ]
-                ]
-            )
-            await replace_menu(
-                update, context, "Введите число.", kb, scope="admin"
-            )
-            return
-        db_exec("UPDATE products SET price=? WHERE id=?", (price, pid))
-        await adm_open_prod(update, context, pid)
-        return
-
-    pid = context.user_data.pop("await_prod_stock_edit", None)
-    if pid:
-        if not has_perm(uid, "prods"):
-            return
-        try:
-            stock = int(text)
-        except Exception:
-            context.user_data["await_prod_stock_edit"] = pid
-            kb = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "◀ Назад",
-                            callback_data=f"adm:prod:{pid}",
-                        )
-                    ]
-                ]
-            )
-            await replace_menu(
-                update, context, "Введите число.", kb, scope="admin"
-            )
-            return
-        db_exec("UPDATE products SET stock=? WHERE id=?", (stock, pid))
         await adm_open_prod(update, context, pid)
         return
 
