@@ -236,7 +236,7 @@ def _normalize_tg_username(raw: str) -> str:
     return raw
 
 
-def reserve_url_for(prod) -> str | None:
+def reserve_url_for(prod, size: str | None = None) -> str | None:
     if not reserve_enabled():
         return None
 
@@ -245,18 +245,18 @@ def reserve_url_for(prod) -> str | None:
     )
     pid = prod["id"]
     name = str(prod["name"])
-    price = prod["price"]
+    size_label = (size or "").strip() or "—"
 
     if not username:
         return None
 
     tpl = (
         get_setting("reserve_msg_tpl")
-        or "Здравствуйте, хочу забронировать украшение {name} (ID: {id}, Цена: {price})"
+        or "Здравствуйте, хочу забронировать украшение {name} (ID: {id}, Размер: {size})"
     )
     txt = (
         tpl.replace("{id}", str(pid))
         .replace("{name}", name)
-        .replace("{price}", str(price))
+        .replace("{size}", size_label)
     )
     return f"https://t.me/{username}?text={quote(txt)}"
