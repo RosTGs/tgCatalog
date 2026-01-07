@@ -43,6 +43,20 @@ def reserve_button(prod) -> InlineKeyboardButton:
     url = f"https://wa.me/{prod['reserve_phone']}?text=Забронировать товар: {prod['name']}"
     return InlineKeyboardButton(f"📞 Забронировать {prod['name']}", url=url)
 
+
+def product_variant_lines(pid: int, fallback_stock: int):
+    rows = db_query(
+        "SELECT name,stock FROM product_variants WHERE product_id=? ORDER BY id",
+        (pid,),
+    )
+    if not rows:
+        return [f"Остаток: {fallback_stock}"], fallback_stock
+    total = sum(row["stock"] for row in rows)
+    lines = ["Варианты:"]
+    lines.extend([f"• {row['name']} — {row['stock']}" for row in rows])
+    lines.append(f"Итого: {total}")
+    return lines, total
+
 # Обработчик старта
 async def client_start_handler(update: Update, context):
     if update.message:
@@ -142,13 +156,15 @@ async def client_products_callback(update: Update, context):
         cats_label = ", ".join([row["name"] for row in cat_rows]) or "—"
 
         # текст карточки товара
+        stock_lines, total_stock = product_variant_lines(pid, prod["stock"])
         lines = [
             f"<b>{prod['name']}</b>",
             f"Категории: {cats_label}",
             f"Цена: {prod['price']} ₽",
-            f"Остаток: {prod['stock']}"
-            + (" (нет в наличии)" if prod["stock"] <= 0 else ""),
+            *stock_lines,
         ]
+        if total_stock <= 0:
+            lines.append("<b>Нет в наличии</b>")
         if prod["description"]:
             lines.append("")
             lines.append(prod["description"])
