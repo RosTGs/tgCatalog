@@ -71,7 +71,7 @@ python main.py
      WorkingDirectory=/srv/bots/tgCatalog
      ExecStart=/srv/bots/tgCatalog/venv/bin/python /srv/bots/tgCatalog/main.py
      Restart=always
-     User=youruser
+     User=root
 
      [Install]
      WantedBy=multi-user.target
