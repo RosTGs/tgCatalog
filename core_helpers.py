@@ -224,36 +224,39 @@ def reserve_text() -> str:
     return get_setting("reserve_text") or "Забронировать"
 
 
+def _normalize_tg_username(raw: str) -> str:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if raw.startswith("@"):
+        return raw[1:]
+    match = re.search(r"t\.me/([^/?#]+)", raw)
+    if match:
+        return match.group(1)
+    return raw
+
+
 def reserve_url_for(prod) -> str | None:
     if not reserve_enabled():
         return None
 
-    mode = (get_setting("reserve_mode") or "raw").strip().lower()
+    username = _normalize_tg_username(
+        get_setting("reserve_tg_username") or ""
+    )
     pid = prod["id"]
     name = str(prod["name"])
     price = prod["price"]
 
-    if mode == "wa":
-        phone = re.sub(r"\D+", "", get_setting("reserve_phone") or "")
-        if not phone:
-            return None
-        tpl = (
-            get_setting("reserve_msg_tpl")
-            or "Здравствуйте, хочу забронировать украшение {name} (ID: {id}, Цена: {price})"
-        )
-        txt = (
-            tpl.replace("{id}", str(pid))
-            .replace("{name}", name)
-            .replace("{price}", str(price))
-        )
-        return f"https://wa.me/{phone}?text={quote(txt)}"
-
-    url_tpl = get_setting("reserve_url") or ""
-    if not url_tpl:
+    if not username:
         return None
-    url = (
-        url_tpl.replace("{id}", str(pid))
+
+    tpl = (
+        get_setting("reserve_msg_tpl")
+        or "Здравствуйте, хочу забронировать украшение {name} (ID: {id}, Цена: {price})"
+    )
+    txt = (
+        tpl.replace("{id}", str(pid))
         .replace("{name}", name)
         .replace("{price}", str(price))
     )
-    return url or None
+    return f"https://t.me/{username}?text={quote(txt)}"

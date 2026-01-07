@@ -762,7 +762,6 @@ async def adm_open_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def adm_open_reserve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_perm(update.effective_user.id, "reserve"):
         return
-    mode = (get_setting("reserve_mode") or "raw").strip().lower()
     prod = db_query(
         "SELECT * FROM products WHERE is_active=1 ORDER BY id LIMIT 1"
     )
@@ -772,24 +771,15 @@ async def adm_open_reserve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sample = reserve_url_for(prod[0]) or "—"
         except Exception:
             sample = "—"
-    if mode == "wa":
-        text = (
-            "<b>Бронь</b>\n"
-            "Режим: WhatsApp\n"
-            f"Текст кнопки: {reserve_text()}\n"
-            f"Телефон: {get_setting('reserve_phone') or ''}\n"
-            f"Шаблон: {get_setting('reserve_msg_tpl') or ''}\n"
-            f"Пример: {sample}"
-        )
-    else:
-        text = (
-            "<b>Бронь</b>\n"
-            "Режим: RAW URL\n"
-            f"Текст кнопки: {reserve_text()}\n"
-            f"URL: {get_setting('reserve_url') or ''}\n"
-            "Шаблоны: {id} {name} {price}\n"
-            f"Пример: {sample}"
-        )
+    text = (
+        "<b>Бронь</b>\n"
+        "Режим: Telegram\n"
+        f"Текст кнопки: {reserve_text()}\n"
+        f"Username/ссылка: {get_setting('reserve_tg_username') or ''}\n"
+        f"Шаблон: {get_setting('reserve_msg_tpl') or ''}\n"
+        "Шаблоны: {id} {name} {price}\n"
+        f"Пример: {sample}"
+    )
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -799,38 +789,21 @@ async def adm_open_reserve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton(
-                f"Тип: {'WhatsApp' if mode == 'wa' else 'RAW URL'} → Переключить",
-                callback_data="adm:reserve:mode",
+                "✏️ Текст кнопки", callback_data="adm:reserve:text"
             )
         ],
         [
             InlineKeyboardButton(
-                "✏️ Текст кнопки", callback_data="adm:reserve:text"
+                "✏️ Telegram username/ссылка",
+                callback_data="adm:reserve:username",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "✏️ Шаблон сообщения", callback_data="adm:reserve:tpl"
             )
         ],
     ]
-    if mode == "wa":
-        rows += [
-            [
-                InlineKeyboardButton(
-                    "✏️ Телефон WhatsApp", callback_data="adm:reserve:phone"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "✏️ Шаблон сообщения", callback_data="adm:reserve:tpl"
-                )
-            ],
-        ]
-    else:
-        rows += [
-            [
-                InlineKeyboardButton(
-                    "✏️ URL-шаблон {id},{name},{price}",
-                    callback_data="adm:reserve:url",
-                )
-            ]
-        ]
     rows.append([InlineKeyboardButton("◀ Меню", callback_data="adm:home")])
     await replace_menu(
         update, context, text, InlineKeyboardMarkup(rows), scope="admin"
@@ -1806,14 +1779,6 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await adm_open_reserve(update, context)
         return
 
-    if data == "adm:reserve:mode":
-        if not has_perm(update.effective_user.id, "reserve"):
-            return
-        mode = (get_setting("reserve_mode") or "raw").strip().lower()
-        set_setting("reserve_mode", "wa" if mode != "wa" else "raw")
-        await adm_open_reserve(update, context)
-        return
-
     if data == "adm:reserve:text":
         if not has_perm(update.effective_user.id, "reserve"):
             return
@@ -1830,33 +1795,17 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data == "adm:reserve:url":
+    if data == "adm:reserve:username":
         if not has_perm(update.effective_user.id, "reserve"):
             return
-        context.user_data["await_reserve_url"] = True
+        context.user_data["await_reserve_username"] = True
         kb = InlineKeyboardMarkup(
             [[InlineKeyboardButton("◀ Назад", callback_data="adm:reserve")]]
         )
         await replace_menu(
             update,
             context,
-            "Новый URL-шаблон (допустимы {id},{name},{price}):",
-            kb,
-            scope="admin",
-        )
-        return
-
-    if data == "adm:reserve:phone":
-        if not has_perm(update.effective_user.id, "reserve"):
-            return
-        context.user_data["await_reserve_phone"] = True
-        kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("◀ Назад", callback_data="adm:reserve")]]
-        )
-        await replace_menu(
-            update,
-            context,
-            "Введите номер WhatsApp:",
+            "Введите Telegram username или ссылку t.me:",
             kb,
             scope="admin",
         )
@@ -2326,31 +2275,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await adm_open_reserve(update, context)
         return
 
-    if context.user_data.pop("await_reserve_url", False):
+    if context.user_data.pop("await_reserve_username", False):
         if not has_perm(uid, "reserve"):
             return
-        if not re.match(r"^https?://", text):
-            context.user_data["await_reserve_url"] = True
-            kb = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("◀ Назад", callback_data="adm:reserve")]]
-            )
-            await replace_menu(
-                update,
-                context,
-                "Нужен http/https URL с {id},{name},{price}.",
-                kb,
-                scope="admin",
-            )
-            return
-        set_setting("reserve_url", text)
-        await adm_open_reserve(update, context)
-        return
-
-    if context.user_data.pop("await_reserve_phone", False):
-        if not has_perm(uid, "reserve"):
-            return
-        digits = re.sub(r"\D+", "", text)
-        set_setting("reserve_phone", digits)
+        set_setting("reserve_tg_username", text.strip())
         await adm_open_reserve(update, context)
         return
 

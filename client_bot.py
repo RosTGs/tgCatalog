@@ -38,12 +38,6 @@ def client_products_keyboard(category_id: int, products) -> InlineKeyboardMarkup
     rows.append([InlineKeyboardButton("🔙 К категориям", callback_data="client:back_categories")])
     return InlineKeyboardMarkup(rows)
 
-# Кнопка бронирования
-def reserve_button(prod) -> InlineKeyboardButton:
-    url = f"https://wa.me/{prod['reserve_phone']}?text=Забронировать товар: {prod['name']}"
-    return InlineKeyboardButton(f"📞 Забронировать {prod['name']}", url=url)
-
-
 def product_variant_lines(pid: int):
     rows = db_query(
         "SELECT name,stock FROM product_variants WHERE product_id=? ORDER BY id",
