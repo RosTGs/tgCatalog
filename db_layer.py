@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from contextlib import closing
 from pathlib import Path
 
@@ -10,29 +11,51 @@ DB_PATH = BASE / os.getenv("DB_PATH", "catalog.db")
 
 BACKUP_DIR = os.getenv("BACKUP_DIR", "backups")
 BACKUP_KEEP = int(os.getenv("BACKUP_KEEP", "20") or "20")
+DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "5") or "5")
+DB_MAX_RETRIES = int(os.getenv("DB_MAX_RETRIES", "5") or "5")
+DB_RETRY_DELAY = float(os.getenv("DB_RETRY_DELAY", "0.2") or "0.2")
 
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=DB_BUSY_TIMEOUT,
+        check_same_thread=False,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(f"PRAGMA busy_timeout={int(DB_BUSY_TIMEOUT * 1000)}")
     return conn
 
 
 def db_query(sql: str, params: tuple | list = ()) -> list[sqlite3.Row]:
-    with closing(connect()) as conn:
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        return cur.fetchall()
+    for attempt in range(DB_MAX_RETRIES + 1):
+        try:
+            with closing(connect()) as conn:
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                return cur.fetchall()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt >= DB_MAX_RETRIES:
+                raise
+            time.sleep(DB_RETRY_DELAY)
+    return []
 
 
 def db_exec(sql: str, params: tuple | list = ()) -> int:
-    with closing(connect()) as conn:
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        conn.commit()
-        return cur.lastrowid
+    for attempt in range(DB_MAX_RETRIES + 1):
+        try:
+            with closing(connect()) as conn:
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                conn.commit()
+                return cur.lastrowid
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt >= DB_MAX_RETRIES:
+                raise
+            time.sleep(DB_RETRY_DELAY)
+    return 0
 
 
 def get_setting(key: str) -> str | None:
