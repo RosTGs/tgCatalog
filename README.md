@@ -41,7 +41,6 @@ python main.py
 3. Клонируйте репозиторий и перейдите в директорию проекта:
    ```bash
    sudo mkdir -p /srv/bots
-   sudo chown -R "$USER":"$USER" /srv/bots
    git clone git@github.com:RosTGs/tgCatalog.git /srv/bots/tgCatalog
    cd /srv/bots/tgCatalog
    ```
