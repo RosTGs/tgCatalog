@@ -62,6 +62,28 @@ python main.py
    ```
 6. Запустите бота (один из вариантов):
    - **systemd**: создайте сервис, чтобы бот стартовал при перезагрузке.
+     Создайте unit-файл (любой удобный способ):
+     ```bash
+     sudo nano /etc/systemd/system/tg-catalog.service
+     ```
+     или
+     ```bash
+     sudo tee /etc/systemd/system/tg-catalog.service > /dev/null <<'EOF'
+     [Unit]
+     Description=TG Catalog Bot
+     After=network.target
+
+     [Service]
+     WorkingDirectory=/srv/bots/tgCatalog
+     ExecStart=/srv/bots/tgCatalog/venv/bin/python /srv/bots/tgCatalog/main.py
+     Restart=always
+     User=root
+
+     [Install]
+     WantedBy=multi-user.target
+     EOF
+     ```
+     Содержимое unit-файла:
      ```ini
      [Unit]
      Description=TG Catalog Bot
@@ -83,6 +105,32 @@ python main.py
      ```
    - **pm2**: можно запустить через `pm2 start "venv/bin/python main.py" --name tg-catalog`.
 7. При необходимости откройте нужные порты в панели Timeweb (например, для вебхуков или внешнего HTTP-доступа).
+
+### Обновление и перезапуск на сервере
+
+1. Остановите сервис:
+   ```bash
+   sudo systemctl stop tg-catalog.service
+   ```
+2. Обновите код:
+   ```bash
+   cd /srv/bots/tgCatalog
+   git pull
+   ```
+3. Обновите зависимости (на всякий случай):
+   ```bash
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+4. Перезапустите сервис:
+   ```bash
+   sudo systemctl start tg-catalog.service
+   ```
+   Если меняли unit-файл — выполните:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart tg-catalog.service
+   ```
 
 ### Хранение базы и резервных копий
 
