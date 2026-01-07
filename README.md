@@ -40,10 +40,10 @@ python main.py
    ```
 3. Клонируйте репозиторий и перейдите в директорию проекта:
    ```bash
-   sudo mkdir -p /srv/tgCatalog
-   sudo chown -R "$USER":"$USER" /srv/tgCatalog
-   git clone <URL_РЕПОЗИТОРИЯ> /srv/tgCatalog
-   cd /srv/tgCatalog
+   sudo mkdir -p /srv/bots
+   sudo chown -R "$USER":"$USER" /srv/bots
+   git clone git@github.com:RosTGs/tgCatalog.git /srv/bots/tgCatalog
+   cd /srv/bots/tgCatalog
    ```
 4. Создайте `.env` и заполните переменные (минимум `BOT_TOKEN`, `ADMIN_IDS`, `DB_PATH`):
    ```bash
@@ -69,8 +69,8 @@ python main.py
      After=network.target
 
      [Service]
-     WorkingDirectory=/srv/tgCatalog
-     ExecStart=/srv/tgCatalog/venv/bin/python /srv/tgCatalog/main.py
+     WorkingDirectory=/srv/bots/tgCatalog
+     ExecStart=/srv/bots/tgCatalog/venv/bin/python /srv/bots/tgCatalog/main.py
      Restart=always
      User=youruser
 
