@@ -220,7 +220,10 @@ def kb_adm_prods_cats(page: int = 0, per: int = 12) -> InlineKeyboardMarkup:
 
 def kb_adm_prods(cat_id: int, page: int = 0, per: int = 10) -> InlineKeyboardMarkup:
     prods = db_query(
-        "SELECT * FROM products WHERE category_id=? ORDER BY id", (cat_id,)
+        "SELECT p.* FROM products p "
+        "JOIN product_categories pc ON pc.product_id=p.id "
+        "WHERE pc.category_id=? ORDER BY p.id",
+        (cat_id,),
     )
     rows: list[list[InlineKeyboardButton]] = []
     start = page * per
@@ -300,19 +303,52 @@ def kb_adm_prod(pid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def product_text(pid: int) -> str:
-    r = db_query(
-        "SELECT p.*, c.name as cat "
-        "FROM products p JOIN categories c ON c.id=p.category_id "
-        "WHERE p.id=?",
+def product_categories(pid: int):
+    return db_query(
+        "SELECT c.id, c.name FROM categories c "
+        "JOIN product_categories pc ON pc.category_id=c.id "
+        "WHERE pc.product_id=? ORDER BY c.id",
         (pid,),
     )
+
+
+def product_categories_label(pid: int) -> str:
+    cats = product_categories(pid)
+    names = ", ".join([c["name"] for c in cats])
+    return names or "—"
+
+
+def kb_adm_prod_categories(pid: int, selected: set[int]) -> InlineKeyboardMarkup:
+    cats = db_query("SELECT * FROM categories ORDER BY id")
+    rows: list[list[InlineKeyboardButton]] = []
+    for c in cats:
+        mark = "✅" if c["id"] in selected else "⬜️"
+        label = f"{mark} {c['id']}. {shorten(c['name'], 24)}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    label,
+                    callback_data=f"adm:prod:cats:toggle:{pid}:{c['id']}",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton("✅ Готово", callback_data=f"adm:prod:cats:done:{pid}")]
+    )
+    rows.append(
+        [InlineKeyboardButton("◀ Отмена", callback_data=f"adm:prod:{pid}")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def product_text(pid: int) -> str:
+    r = db_query("SELECT * FROM products WHERE id=?", (pid,))
     if not r:
         return "Товар не найден"
     p = r[0]
     lines = [
         f"<b>{p['name']}</b>",
-        f"ID: {p['id']}  Категория: {p['cat']}",
+        f"ID: {p['id']}  Категории: {product_categories_label(pid)}",
         f"Цена: {p['price']} ₽  Остаток: {p['stock']}",
         f"Активен: {bool(p['is_active'])}",
         "",
@@ -503,24 +539,23 @@ async def adm_open_prod(
 ):
     if not has_perm(update.effective_user.id, "prods"):
         return
+    if context.user_data.get("prod_cats_pid") == pid:
+        context.user_data.pop("prod_cats_pid", None)
+        context.user_data.pop("prod_cats_selected", None)
 
     await delete_scope(update, context, "admin")
 
     chat_id = update.effective_chat.id
 
     # грузим товар
-    r = db_query(
-        "SELECT p.*, c.name as cat "
-        "FROM products p JOIN categories c ON c.id=p.category_id "
-        "WHERE p.id=?",
-        (pid,),
-    )
+    r = db_query("SELECT * FROM products WHERE id=?", (pid,))
     if not r:
         m = await context.bot.send_message(chat_id, "Товар не найден")
         await remember(update, m.message_id, "admin")
         return
 
     prod = r[0]
+    cats_label = product_categories_label(pid)
 
     # 1) сначала все фото медиагруппой
     photos = db_query(
@@ -538,7 +573,7 @@ async def adm_open_prod(
     # 2) затем текст + кнопки
     lines = [
         f"<b>{prod['name']}</b>",
-        f"Категория: {prod['cat']}",
+        f"Категории: {cats_label}",
         f"Цена: {prod['price']} ₽",
         f"Остаток: {prod['stock']}"
         + (" (нет в наличии)" if prod["stock"] <= 0 else ""),
@@ -728,10 +763,14 @@ def export_json() -> dict:
     cats = db_query("SELECT * FROM categories ORDER BY id")
     prods = db_query("SELECT * FROM products ORDER BY id")
     photos = db_query("SELECT product_id,file_id FROM photos ORDER BY id")
+    prod_cats = db_query(
+        "SELECT product_id,category_id FROM product_categories ORDER BY product_id"
+    )
     return {
         "categories": [dict(r) for r in cats],
         "products": [dict(r) for r in prods],
         "photos": [dict(r) for r in photos],
+        "product_categories": [dict(r) for r in prod_cats],
     }
 
 
@@ -739,6 +778,7 @@ def import_json(data: dict):
     cats = data.get("categories", [])
     prods = data.get("products", [])
     photos = data.get("photos", [])
+    prod_cats = data.get("product_categories", [])
     with closing(connect()) as c:
         cur = c.cursor()
         cur.execute("BEGIN")
@@ -768,7 +808,7 @@ def import_json(data: dict):
                            is_active=excluded.is_active""",
                     (
                         p.get("id"),
-                        p["category_id"],
+                        p.get("category_id"),
                         p["name"],
                         p.get("description", ""),
                         int(p.get("price", 0)),
@@ -776,6 +816,21 @@ def import_json(data: dict):
                         int(p.get("is_active", 1)),
                         p.get("created_at"),
                     ),
+                )
+            if not prod_cats:
+                for p in prods:
+                    cat_id = p.get("category_id")
+                    if cat_id is None:
+                        continue
+                    prod_cats.append(
+                        {"product_id": p.get("id"), "category_id": cat_id}
+                    )
+            for rel in prod_cats:
+                cur.execute(
+                    """INSERT INTO product_categories(product_id,category_id)
+                       VALUES(?,?)
+                       ON CONFLICT(product_id,category_id) DO NOTHING""",
+                    (rel["product_id"], rel["category_id"]),
                 )
             for ph in photos:
                 cur.execute(
@@ -798,8 +853,9 @@ async def show_shop_grid(
 ):
     await delete_scope(update, context, "shop")
     prods = db_query(
-        "SELECT * FROM products "
-        "WHERE is_active=1 AND category_id=? ORDER BY id",
+        "SELECT p.* FROM products p "
+        "JOIN product_categories pc ON pc.product_id=p.id "
+        "WHERE p.is_active=1 AND pc.category_id=? ORDER BY p.id",
         (cat_id,),
     )
     chat_id = update.effective_chat.id
@@ -843,7 +899,7 @@ async def show_shop_grid(
             [
                 [
                     InlineKeyboardButton(
-                        "Подробнее", callback_data=f"shop:prod:{pid}"
+                        "Подробнее", callback_data=f"shop:prod:{cat_id}:{pid}"
                     )
                 ]
             ]
@@ -891,16 +947,11 @@ async def show_shop_grid(
 
 
 async def show_shop_product(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, pid: int
+    update: Update, context: ContextTypes.DEFAULT_TYPE, cat_id: int, pid: int
 ):
     await delete_scope(update, context, "shop")
 
-    r = db_query(
-        "SELECT p.*, c.name as cat "
-        "FROM products p JOIN categories c ON c.id=p.category_id "
-        "WHERE p.id=?",
-        (pid,),
-    )
+    r = db_query("SELECT * FROM products WHERE id=?", (pid,))
     chat_id = update.effective_chat.id
     if not r:
         m = await context.bot.send_message(chat_id, "Товар не найден")
@@ -908,11 +959,12 @@ async def show_shop_product(
         return
 
     prod = r[0]
+    cats_label = product_categories_label(pid)
 
     # --- текст карточки ---
     lines = [
         f"<b>{prod['name']}</b>",
-        f"Категория: {prod['cat']}",
+        f"Категории: {cats_label}",
         f"Цена: {prod['price']} ₽",
         f"Остаток: {prod['stock']}"
         + (" (нет в наличии)" if prod["stock"] <= 0 else ""),
@@ -930,7 +982,7 @@ async def show_shop_product(
     rows.append(
         [
             InlineKeyboardButton(
-                "◀ Назад", callback_data=f"shop:cat:{prod['category_id']}:0"
+                "◀ Назад", callback_data=f"shop:cat:{cat_id}:0"
             )
         ]
     )
@@ -1000,8 +1052,10 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("shop:prod:"):
-        pid = int(data.split(":")[2])
-        await show_shop_product(update, context, pid)
+        parts = data.split(":")
+        cat_id = int(parts[2])
+        pid = int(parts[3])
+        await show_shop_product(update, context, cat_id, pid)
         return
 
     # ---------- всё, что ниже, только для админа/редактора ----------
@@ -1068,7 +1122,22 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not has_perm(update.effective_user.id, "cats"):
             return
         cid = int(data.split(":")[4])
-        db_exec("DELETE FROM products WHERE category_id=?", (cid,))
+        prod_ids = db_query(
+            "SELECT product_id FROM product_categories WHERE category_id=?",
+            (cid,),
+        )
+        db_exec("DELETE FROM product_categories WHERE category_id=?", (cid,))
+        if prod_ids:
+            ids = [row["product_id"] for row in prod_ids]
+            placeholders = ",".join(["?"] * len(ids))
+            db_exec(
+                f"""DELETE FROM products
+                    WHERE id IN ({placeholders})
+                    AND id NOT IN (
+                        SELECT product_id FROM product_categories
+                    )""",
+                tuple(ids),
+            )
         db_exec("DELETE FROM categories WHERE id=?", (cid,))
         await adm_open_cats(update, context, 0)
         return
@@ -1095,7 +1164,7 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await replace_menu(
             update,
             context,
-            "Удалить категорию и все её товары?",
+            "Удалить категорию и связи с товарами? Товары без категорий будут удалены.",
             kb,
             scope="admin",
         )
@@ -1214,6 +1283,61 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pid = int(data.split(":")[4])
         db_exec("DELETE FROM products WHERE id=?", (pid,))
         await adm_open_prods_cats(update, context, 0)
+        return
+
+    if data.startswith("adm:prod:cats:toggle:"):
+        if not has_perm(update.effective_user.id, "prods"):
+            return
+        parts = data.split(":")
+        pid = int(parts[4])
+        cat_id = int(parts[5])
+        if context.user_data.get("prod_cats_pid") != pid:
+            context.user_data["prod_cats_pid"] = pid
+            context.user_data["prod_cats_selected"] = {
+                row["id"] for row in product_categories(pid)
+            }
+        selected = context.user_data.get("prod_cats_selected", set())
+        if cat_id in selected:
+            selected.remove(cat_id)
+        else:
+            selected.add(cat_id)
+        context.user_data["prod_cats_selected"] = selected
+        await replace_menu(
+            update,
+            context,
+            "Выберите категории для товара (можно несколько):",
+            kb_adm_prod_categories(pid, selected),
+            scope="admin",
+        )
+        return
+
+    if data.startswith("adm:prod:cats:done:"):
+        if not has_perm(update.effective_user.id, "prods"):
+            return
+        pid = int(data.split(":")[4])
+        if context.user_data.get("prod_cats_pid") != pid:
+            context.user_data["prod_cats_selected"] = {
+                row["id"] for row in product_categories(pid)
+            }
+        selected = context.user_data.get("prod_cats_selected", set())
+        if not selected:
+            await replace_menu(
+                update,
+                context,
+                "Нужно выбрать хотя бы одну категорию.",
+                kb_adm_prod_categories(pid, selected),
+                scope="admin",
+            )
+            return
+        db_exec("DELETE FROM product_categories WHERE product_id=?", (pid,))
+        for cat_id in sorted(selected):
+            db_exec(
+                "INSERT INTO product_categories(product_id,category_id) VALUES(?,?)",
+                (pid, cat_id),
+            )
+        context.user_data.pop("prod_cats_pid", None)
+        context.user_data.pop("prod_cats_selected", None)
+        await adm_open_prod(update, context, pid)
         return
 
     if data.startswith("adm:prod:delete:"):
@@ -1933,11 +2057,24 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price = context.user_data.pop("new_prod_price", 0)
         pid = db_exec(
             """INSERT INTO products(
-                   category_id,name,description,price,stock,is_active
-               ) VALUES(?,?,?,?,?,1)""",
-            (cat_id, name, desc, price, stock),
+                   name,description,price,stock,is_active
+               ) VALUES(?,?,?,?,1)""",
+            (name, desc, price, stock),
         )
-        await adm_open_prod(update, context, pid)
+        cats = db_query("SELECT * FROM categories ORDER BY id")
+        if not cats:
+            await adm_open_prod(update, context, pid)
+            return
+        selected = {cat_id} if cat_id else set()
+        context.user_data["prod_cats_pid"] = pid
+        context.user_data["prod_cats_selected"] = selected
+        await replace_menu(
+            update,
+            context,
+            "Выберите категории для товара (можно несколько):",
+            kb_adm_prod_categories(pid, selected),
+            scope="admin",
+        )
         return
 
     # --- редактирование товара ---
