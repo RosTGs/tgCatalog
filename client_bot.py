@@ -48,8 +48,14 @@ def product_variant_lines(pid: int):
     total = sum(row["stock"] for row in rows)
     lines = ["Варианты:"]
     lines.extend([f"• {row['name']} — {row['stock']}" for row in rows])
-    lines.append(f"Итого: {total}")
     return lines, total
+
+
+def product_variants(pid: int):
+    return db_query(
+        "SELECT name,stock FROM product_variants WHERE product_id=? ORDER BY id",
+        (pid,),
+    )
 
 # Обработчик старта
 async def client_start_handler(update: Update, context):
@@ -167,7 +173,17 @@ async def client_products_callback(update: Update, context):
         # кнопки
         buttons: list[list[InlineKeyboardButton]] = []
         url = reserve_url_for(prod)
-        if url:
+        variants = product_variants(pid)
+        if variants and url:
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        reserve_text(),
+                        callback_data=f"client:reserve:{cat_id}:{pid}",
+                    )
+                ]
+            )
+        elif url:
             buttons.append([InlineKeyboardButton(reserve_text(), url=url)])
         buttons.append(
             [
@@ -214,13 +230,66 @@ async def client_products_callback(update: Update, context):
 
         return
 
+    if data.startswith("client:reserve:"):
+        _, _, cat_id_str, prod_id_str = data.split(":")
+        cat_id = int(cat_id_str)
+        pid = int(prod_id_str)
+        rows = db_query("SELECT * FROM products WHERE id=?", (pid,))
+        if not rows:
+            categories = db_query("SELECT * FROM categories ORDER BY id", ())
+            cats = [dict(row) for row in categories]
+            await query.edit_message_text(
+                "Товар не найден.", reply_markup=client_categories_keyboard(cats)
+            )
+            return
+        prod = rows[0]
+        variants = product_variants(pid)
+        lines = [f"<b>{prod['name']}</b>"]
+        if variants:
+            lines.append("Выберите размер для брони:")
+        else:
+            lines.append("Размеры не указаны.")
+        buttons: list[list[InlineKeyboardButton]] = []
+        if variants:
+            for v in variants:
+                url = reserve_url_for(prod, v["name"])
+                if url:
+                    buttons.append([InlineKeyboardButton(v["name"], url=url)])
+        else:
+            url = reserve_url_for(prod)
+            if url:
+                buttons.append([InlineKeyboardButton(reserve_text(), url=url)])
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    "◀ Назад к товару",
+                    callback_data=f"client:product:{cat_id}:{pid}",
+                )
+            ]
+        )
+        buttons.append(
+            [InlineKeyboardButton("🏠 В НАЧАЛО", callback_data="client:back_main")]
+        )
+        kb = InlineKeyboardMarkup(buttons)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await context.bot.send_message(
+            query.message.chat_id,
+            "\n".join(lines),
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
 
 
 # Регистрация хендлеров
 def register_client_handlers(app):
     app.add_handler(CallbackQueryHandler(client_menu_callback, pattern=r"^client:(categories|back_main)$"))
     app.add_handler(CallbackQueryHandler(client_categories_callback, pattern=r"^client:(back_main|cat:\d+)$"))
-    app.add_handler(CallbackQueryHandler(client_products_callback, pattern=r"^client:(back_categories|product:\d+:\d+)$"))
+    app.add_handler(CallbackQueryHandler(client_products_callback, pattern=r"^client:(back_categories|product:\d+:\d+|reserve:\d+:\d+)$"))
     app.add_handler(CommandHandler("start", client_start_handler))
 
 # Запуск бота

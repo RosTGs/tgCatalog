@@ -79,7 +79,7 @@ def product_variant_info(pid: int) -> tuple[int, bool, list[str]]:
 def product_stock_lines(pid: int) -> tuple[list[str], int, bool]:
     total, has_variants, variant_lines = product_variant_info(pid)
     if has_variants:
-        lines = ["Варианты:"] + variant_lines + [f"Итого: {total}"]
+        lines = ["Варианты:"] + variant_lines
     else:
         lines = ["Варианты: нет."]
     return lines, total, has_variants
@@ -777,7 +777,7 @@ async def adm_open_reserve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Текст кнопки: {reserve_text()}\n"
         f"Username/ссылка: {get_setting('reserve_tg_username') or ''}\n"
         f"Шаблон: {get_setting('reserve_msg_tpl') or ''}\n"
-        "Шаблоны: {id} {name} {price}\n"
+        "Шаблоны: {id} {name} {size}\n"
         f"Пример: {sample}"
     )
     rows: list[list[InlineKeyboardButton]] = [
@@ -1123,8 +1123,17 @@ async def show_shop_product(
 
     # --- кнопки ---
     rows: list[list[InlineKeyboardButton]] = []
+    variants = product_variants(pid)
     url = reserve_url_for(prod)
-    if url:
+    if variants and url:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    reserve_text(), callback_data=f"shop:reserve:{cat_id}:{pid}"
+                )
+            ]
+        )
+    elif url:
         rows.append([InlineKeyboardButton(reserve_text(), url=url)])
     rows.append(
         [
@@ -1158,6 +1167,48 @@ async def show_shop_product(
             parse_mode=ParseMode.HTML,
         )
 
+    await remember(update, msg.message_id, "shop")
+
+
+async def show_shop_reserve_sizes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, cat_id: int, pid: int
+):
+    await delete_scope(update, context, "shop")
+    r = db_query("SELECT * FROM products WHERE id=?", (pid,))
+    chat_id = update.effective_chat.id
+    if not r:
+        m = await context.bot.send_message(chat_id, "Товар не найден")
+        await remember(update, m.message_id, "shop")
+        return
+
+    prod = r[0]
+    variants = product_variants(pid)
+    lines = [f"<b>{prod['name']}</b>"]
+    if variants:
+        lines.append("Выберите размер для брони:")
+    else:
+        lines.append("Размеры не указаны.")
+    rows: list[list[InlineKeyboardButton]] = []
+    if variants:
+        for v in variants:
+            url = reserve_url_for(prod, v["name"])
+            if url:
+                rows.append([InlineKeyboardButton(v["name"], url=url)])
+    else:
+        url = reserve_url_for(prod)
+        if url:
+            rows.append([InlineKeyboardButton(reserve_text(), url=url)])
+    rows.append(
+        [InlineKeyboardButton("◀ Назад", callback_data=f"shop:prod:{cat_id}:{pid}")]
+    )
+    rows.append([InlineKeyboardButton("🏠 В НАЧАЛО", callback_data="shop:home")])
+    kb = InlineKeyboardMarkup(rows)
+    msg = await context.bot.send_message(
+        chat_id,
+        "\n".join(lines),
+        reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
     await remember(update, msg.message_id, "shop")
 
 # ================== CALLBACK-РОУТЕР (shop + adm) ==================
@@ -1203,6 +1254,13 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cat_id = int(parts[2])
         pid = int(parts[3])
         await show_shop_product(update, context, cat_id, pid)
+        return
+
+    if data.startswith("shop:reserve:"):
+        parts = data.split(":")
+        cat_id = int(parts[2])
+        pid = int(parts[3])
+        await show_shop_reserve_sizes(update, context, cat_id, pid)
         return
 
     # ---------- всё, что ниже, только для админа/редактора ----------
@@ -1821,7 +1879,7 @@ async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await replace_menu(
             update,
             context,
-            "Шаблон сообщения. Доступны {id},{name},{price}:",
+            "Шаблон сообщения. Доступны {id},{name},{size}:",
             kb,
             scope="admin",
         )

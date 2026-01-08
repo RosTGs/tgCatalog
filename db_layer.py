@@ -165,8 +165,8 @@ CREATE TABLE IF NOT EXISTS messages (
         "reserve_text": "Забронировать",
         "reserve_mode": "tg",
         "reserve_tg_username": "",
-        "reserve_msg_tpl": "Здравствуйте, хочу забронировать украшение {name} (ID: {id}, Цена: {price})",
-        "reserve_url": "https://example.com/reserve?pid={id}&name={name}&price={price}",
+        "reserve_msg_tpl": "Здравствуйте, хочу забронировать украшение {name} (ID: {id}, Размер: {size})",
+        "reserve_url": "https://example.com/reserve?pid={id}&name={name}&size={size}",
         "links_json": "[]",
     }
     for k, v in defaults.items():
